@@ -80,16 +80,35 @@ def randomword(length):
 start = time.time()
 packet_size=3000
 
+# parse the command line
+parser = argparse.ArgumentParser(description="Classify a live camera stream using an image recognition DNN.",
+                                                   formatter_class=argparse.RawTextHelpFormatter, epilog=jetson.inference.imageNet.Usage())
+parser.add_argument("file_in", type=str, default="image.jpg", help="filename of the input image to process")
+parser.add_argument("--network", type=str, default="googlenet", help="pre-trained model to load, see below for options")
+parser.add_argument("--camera", type=str, default="/dev/video0", help="index of the MIPI CSI camera to use (NULL for CSI camera 0),\nor for VL42 cameras the /dev/video node to use (/dev/video0).\nby default, MIPI CSI camera 0 will be used.")
+parser.add_argument("--width", type=int, default=1280, help="desired width of camera stream (default is 1280 pixels)")
+parser.add_argument("--height", type=int, default=720, help="desired height of camera stream (default is 720 pixels)")
+
+opt, argv = parser.parse_known_args()
+
+width = 1280
+height=720
+dnetwork = "googlenet"
+
+head_tail = os.path.split(opt.camera)
+
+camera = head_tail[1]
+
 # Create unique id
-uniqueid = 'nano_uuid_{0}_{1}'.format(randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
-uuid = '{0}_{1}'.format(strftime("%Y%m%d%H%M%S",gmtime()),uuid.uuid4())
+uniqueid = 'xav_uuid_{0}_{1}_{2}'.format(camera,randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
+uuid = '{0}_{1}_{2}'.format(camera,strftime("%Y%m%d%H%M%S",gmtime()),uuid.uuid4())
 
 host_name = socket.gethostname()
 host_ip = socket.gethostbyname(host_name)
 
 # image output
-filename = '/home/nvidia/nvme/images/image_{0}_{1}.jpg'.format(randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
-filename2 = '/home/nvidia/nvme/images/out_{0}_{1}.jpg'.format(randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
+filename = '/home/nvidia/nvme/images/img_{0}_{1}_{2}.jpg'.format(camera,randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
+filename2 = '/home/nvidia/nvme/images/out_{0}_{1}_{2}.jpg'.format(camera,randomword(3),strftime("%Y%m%d%H%M%S",gmtime()))
 
 # /opt/demo/images
 
@@ -110,28 +129,14 @@ gputemp = str(round(float(gputemp)) / 1000)
 gputempf = str(round(9.0/5.0 * float(gputemp) + 32))
 f.close()
  
-# parse the command line
-parser = argparse.ArgumentParser(description="Classify a live camera stream using an image recognition DNN.", 
-						   formatter_class=argparse.RawTextHelpFormatter, epilog=jetson.inference.imageNet.Usage())
-parser.add_argument("file_in", type=str, default=filename, help="filename of the input image to process")
-parser.add_argument("--network", type=str, default="googlenet", help="pre-trained model to load, see below for options")
-parser.add_argument("--camera", type=str, default="/dev/video0", help="index of the MIPI CSI camera to use (NULL for CSI camera 0),\nor for VL42 cameras the /dev/video node to use (/dev/video0).\nby default, MIPI CSI camera 0 will be used.")
-parser.add_argument("--width", type=int, default=1280, help="desired width of camera stream (default is 1280 pixels)")
-parser.add_argument("--height", type=int, default=720, help="desired height of camera stream (default is 720 pixels)")
-
-opt, argv = parser.parse_known_args()
-
-width = 1280
-height=720
-
 # load the recognition network
-net = jetson.inference.imageNet(opt.network, argv)
+net = jetson.inference.imageNet(dnetwork, argv)
 
 # Debug off
 net.EnableDebug()
 
 # create the camera and display
-camera = jetson.utils.gstCamera(opt.width, opt.height, opt.camera)
+camera = jetson.utils.gstCamera(width, height, opt.camera)
 camera.Open()
 
 img, width, height = camera.CaptureRGBA(zeroCopy=1)
@@ -139,6 +144,8 @@ img, width, height = camera.CaptureRGBA(zeroCopy=1)
 # classify the image
 class_idx, confidence = net.Classify(img, width, height)
 
+# save raw file
+jetson.utils.saveImageRGBA(filename, img, width, height)
 # find the object description
 class_desc = net.GetClassDesc(class_idx)
 
@@ -153,6 +160,7 @@ end = time.time()
 row = { }
 
 row['uuid'] =  uniqueid
+row['camera'] = str(opt.camera)
 row['ipaddress']=ipaddress
 row['networktime'] = net.GetNetworkTime() 
 row['top1pct'] =  (confidence * 100)
@@ -163,8 +171,9 @@ row['gputempf'] =  gputempf
 row['cputempf'] =  cputempf
 row['runtime'] = str(round(end - start)) 
 row['host'] = os.uname()[1]
+row['camera'] = opt.camera
 row['filename'] = filename2
-row['imageinput'] = opt.file_in
+row['imageinput'] = filename
 row['host_name'] = host_name
 row['macaddress'] = psutil_iface('wlan0')
 row['end'] = '{0}'.format( str(end ))
@@ -176,6 +185,6 @@ row['diskusage'] = "{:.1f} MB".format(float(usage.free) / 1024 / 1024)
 row['memory'] = psutil.virtual_memory().percent
 row['id'] = str(uuid)
 json_string = json.dumps(row)
-fa=open("/home/nvidia/nvme/logs/nano.log", "a+")
+fa=open("/home/nvidia/nvme/logs/demo1.log", "a+")
 fa.write(json_string + "\n")
 fa.close()
